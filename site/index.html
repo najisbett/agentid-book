@@ -51,6 +51,19 @@
   </div>
 
   <div class="card">
+    <label>Free mint · 10.000 AGENT per nama .ai</label>
+    <p style="color:#9aa8c7;font-size:15px;line-height:1.5;margin:0 0 12px">
+      Token <b>AgentID Book (AGENT)</b> supply tetap 10 juta, tanpa owner. Satu-satunya jalan
+      token keluar dari kontrak adalah <code>claim()</code>, dan hanya alamat yang sudah
+      mengikat nama .ai di buku ini yang bisa memanggilnya. Satu klaim per alamat, selamanya.</p>
+    <div class="row">
+      <button class="primary" id="claim">Klaim 10.000 AGENT</button>
+      <button class="ghost" id="tokeninfo">Info token</button>
+    </div>
+    <div class="out" id="claimout"></div>
+  </div>
+
+  <div class="card">
     <label>Bound agents</label>
     <div class="grid" id="list"><div class="agent">loading…</div></div>
   </div>
@@ -63,6 +76,7 @@
 
 <script>
 const CONTRACT = "0xEb3f86766438afF66f4da3d6a61F2767E44c9Fb0";
+const TOKEN = "0x8375a4985063dA427dFbF62D1b08CC846a9bDaB1";
 const RELAYER = "";
 const CHAIN_ID = 56;
 const ABI = [
@@ -120,6 +134,32 @@ async function load() {
   if (!r.agents || !r.agents.length) { el.innerHTML = '<div class="agent">No agents bound yet. Be the first.</div>'; return; }
   el.innerHTML = r.agents.map(a => `<div class="agent"><b>${a.handle}.ai</b><br>${a.owner.slice(0,10)}…${a.owner.slice(-6)}</div>`).join('');
 }
+async function claim() {
+  const el = document.getElementById('claimout');
+  const say = (t, ok) => { el.className = ok ? 'out ok' : 'out'; el.textContent = t; };
+  if (!account) await connect();
+  const e = await eth();
+  say("Menunggu konfirmasi di wallet\u2026");
+  const tx = await e.request({ method: "eth_sendTransaction", params: [{ from: account, to: TOKEN, data: "0x4e71d92d" }] });
+  say("Terkirim: " + tx + "\nmenunggu masuk blok\u2026");
+  for (let i = 0; i < 40; i++) {
+    const r = await e.request({ method: "eth_getTransactionReceipt", params: [tx] });
+    if (r) {
+      const ok = r.status === "0x1";
+      say(ok ? ("10.000 AGENT masuk ke " + account + "\ntx: " + tx) : ("Klaim gagal (reverted): " + tx), ok);
+      return;
+    }
+    await new Promise(res => setTimeout(res, 3000));
+  }
+  say("Masih pending, cek explorer: " + tx);
+}
+document.getElementById('claim').onclick = () => claim().catch(e => {
+  const el = document.getElementById('claimout'); el.className = 'out'; el.textContent = String(e.message || e);
+});
+document.getElementById('tokeninfo').onclick = () => {
+  const el = document.getElementById('claimout'); el.className = 'out';
+  el.textContent = "Token: " + TOKEN + "\nSupply: 10.000.000 AGENT (tetap, tanpa mint)\nAlokasi: 10.000 per nama .ai\nBscScan: https://bscscan.com/token/" + TOKEN;
+};
 document.getElementById('bind').onclick = () => bind().catch(e=>out(String(e.message||e)));
 document.getElementById('lookup').onclick = () => lookup().catch(e=>out(String(e.message||e)));
 document.getElementById('connect').onclick = () => connect().catch(e=>out(String(e.message||e)));
