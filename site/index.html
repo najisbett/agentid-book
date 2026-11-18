@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AgentID Book — an on-chain book for .ai names</title>
+<style>
+  :root { --bg:#0a0e18; --card:#121a2b; --line:#1f2b45; --ink:#eef2ff; --dim:#9aa8c7; --gold:#f5a524; --green:#34d399; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:radial-gradient(1000px 500px at 20% -10%,#1b2540,transparent 60%),var(--bg); color:var(--ink);
+         font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
+  .wrap { max-width:820px; margin:0 auto; padding:56px 22px 80px; }
+  h1 { font-size:44px; line-height:1.05; margin:0 0 10px; letter-spacing:-1px; }
+  h1 span { color:var(--gold); }
+  .lede { color:var(--dim); font-size:18px; line-height:1.5; max-width:640px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:16px; padding:22px; margin-top:26px; }
+  label { display:block; font-size:13px; letter-spacing:2px; text-transform:uppercase; color:var(--dim); margin-bottom:8px; }
+  input { width:100%; padding:14px 16px; border-radius:10px; border:1px solid var(--line); background:#0e1524; color:var(--ink);
+          font-size:18px; outline:none; }
+  input:focus { border-color:var(--gold); }
+  .row { display:flex; gap:12px; margin-top:14px; flex-wrap:wrap; }
+  button { padding:14px 20px; border-radius:10px; border:0; font-size:16px; font-weight:700; cursor:pointer; }
+  .primary { background:var(--gold); color:#111; }
+  .ghost { background:transparent; border:1px solid var(--line); color:var(--ink); }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  .out { margin-top:16px; font-size:15px; line-height:1.5; color:var(--dim); white-space:pre-wrap; }
+  .ok { color:var(--green); }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:12px; margin-top:16px; }
+  .agent { background:#0e1524; border:1px solid var(--line); border-radius:10px; padding:12px 14px; font-size:14px; }
+  .agent b { color:var(--gold); }
+  code { background:#0e1524; padding:2px 6px; border-radius:6px; font-size:13px; }
+  .foot { margin-top:34px; color:#5d6b8a; font-size:13px; line-height:1.6; }
+  a { color:var(--gold); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>AgentID <span>Book</span></h1>
+  <p class="lede">Agent IDs are Binance Wallet names ending in <code>.ai</code>. Resolution lives off-chain, so no contract can
+  read them. This book puts them on BNB Chain: a holder signs once, anyone pays the gas, and every dApp can gate on the name.</p>
+
+  <div class="card">
+    <label for="handle">Your Agent ID</label>
+    <input id="handle" placeholder="baguslupamakan" autocomplete="off" spellcheck="false">
+    <div class="row">
+      <button class="primary" id="bind">Bind my name</button>
+      <button class="ghost" id="lookup">Look up</button>
+      <button class="ghost" id="connect">Connect wallet</button>
+    </div>
+    <div class="out" id="out"></div>
+  </div>
+
+  <div class="card">
+    <label>Bound agents</label>
+    <div class="grid" id="list"><div class="agent">loading…</div></div>
+  </div>
+
+  <p class="foot">
+    The contract verifies an EIP-712 signature from the address your Agent ID resolves to, so nobody can bind a name they do not own.
+    One name per address, one address per name. Gas is paid by the relayer.
+  </p>
+</div>
+
+<script>
+const CONTRACT = "__CONTRACT__";
+const RELAYER = "__RELAYER__";
+const CHAIN_ID = 56;
+const ABI = [
+  "function idOfHandle(string) view returns (bytes32)",
+  "function resolveHandle(string) view returns (address)",
+  "function handleOf(address) view returns (string)",
+  "function isAgent(address) view returns (bool)",
+  "function agentCount() view returns (uint256)",
+  "function agentAt(uint256) view returns (address)"
+];
+const out = (t, ok) => { const el=document.getElementById('out'); el.className = ok ? 'out ok' : 'out'; el.textContent = t; };
+let account = null, provider = null;
+
+async function eth() { if (!window.ethereum) throw new Error("No wallet in this browser. Open this page inside Binance Wallet."); return window.ethereum; }
+async function connect() {
+  const e = await eth();
+  const accs = await e.request({ method: "eth_requestAccounts" });
+  account = accs[0];
+  try { await e.request({ method: "wallet_switchEthereumChain", params: [{ chainId: "0x38" }] }); } catch (_) {}
+  document.getElementById('connect').textContent = account.slice(0,6)+"…"+account.slice(-4);
+  out("Wallet: " + account, true);
+  return account;
+}
+async function lookup() {
+  const h = document.getElementById('handle').value.trim().toLowerCase().replace(/\.ai$/,"");
+  if (!h) return out("Type a handle first.");
+  const r = await fetch(`${RELAYER}/resolve?handle=${encodeURIComponent(h)}`).then(r=>r.json()).catch(()=>({}));
+  out(r.address && r.address !== "0x0000000000000000000000000000000000000000"
+      ? `${h}.ai → ${r.address}` : `${h}.ai is not bound yet.`, !!(r.address && r.address!=="0x0000000000000000000000000000000000000000"));
+}
+async function bind() {
+  const h = document.getElementById('handle').value.trim().toLowerCase().replace(/\.ai$/,"");
+  if (!h) return out("Type a handle first.");
+  if (!account) await connect();
+  const e = await eth();
+  const id = await fetch(`${RELAYER}/id?handle=${encodeURIComponent(h)}`).then(r=>r.json()).then(r=>r.id).catch(()=>null);
+  if (!id) return out("Relayer unreachable.");
+  const deadline = Math.floor(Date.now()/1000) + 900;
+  const typed = {
+    domain: { name: "AgentIDBook", version: "1", chainId: CHAIN_ID, verifyingContract: CONTRACT },
+    types: { Bind: [ {name:"id",type:"bytes32"}, {name:"owner",type:"address"}, {name:"handle",type:"string"}, {name:"deadline",type:"uint256"} ] },
+    primaryType: "Bind",
+    message: { id, owner: account, handle: h, deadline }
+  };
+  out("Waiting for your signature — no gas, no transaction from you…");
+  const sig = await e.request({ method: "eth_signTypedData_v4", params: [account, JSON.stringify(typed)] });
+  const r = await fetch(`${RELAYER}/bind`, { method:"POST", headers:{"content-type":"application/json"},
+    body: JSON.stringify({ id, owner: account, handle: h, deadline, signature: sig }) }).then(r=>r.json()).catch(e=>({ok:false,error:String(e)}));
+  out(r.ok ? `${h}.ai is bound on-chain.\ntx: ${r.tx}` : `Not bound: ${r.error || "unknown error"}`, !!r.ok);
+  if (r.ok) load();
+}
+async function load() {
+  const r = await fetch(`${RELAYER}/agents`).then(r=>r.json()).catch(()=>({agents:[]}));
+  const el = document.getElementById('list');
+  if (!r.agents || !r.agents.length) { el.innerHTML = '<div class="agent">No agents bound yet. Be the first.</div>'; return; }
+  el.innerHTML = r.agents.map(a => `<div class="agent"><b>${a.handle}.ai</b><br>${a.owner.slice(0,10)}…${a.owner.slice(-6)}</div>`).join('');
+}
+document.getElementById('bind').onclick = () => bind().catch(e=>out(String(e.message||e)));
+document.getElementById('lookup').onclick = () => lookup().catch(e=>out(String(e.message||e)));
+document.getElementById('connect').onclick = () => connect().catch(e=>out(String(e.message||e)));
+load();
+</script>
+</body>
+</html>
