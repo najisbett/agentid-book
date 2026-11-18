@@ -78,12 +78,11 @@ async function handleBind(body, res) {
   const expected = await book.idOfHandle(handle);
   if (id.toLowerCase() !== expected.toLowerCase()) return json(res, 400, { ok: false, error: "id does not match handle" });
 
-  const digest = await book.bindDigest(id, owner, handle, deadline).catch(() => null);
-  const recovered = digest ? ethers.verifyTypedData(
+  const recovered = ethers.verifyTypedData(
     { name: "AgentIDBook", version: "1", chainId: 56, verifyingContract: CONTRACT },
     { Bind: [ { name: "id", type: "bytes32" }, { name: "owner", type: "address" }, { name: "handle", type: "string" }, { name: "deadline", type: "uint256" } ] },
-    { id, owner, handle, deadline }, signature) : null;
-  if (recovered !== owner) return json(res, 400, { ok: false, error: "signature is not from that address" });
+    { id, owner, handle, deadline }, signature);
+  if (ethers.getAddress(recovered) !== ethers.getAddress(owner)) return json(res, 400, { ok: false, error: "signature is not from that address", recovered });
 
   const bound = await book.idOf(owner);
   if (bound !== ethers.ZeroHash) return json(res, 409, { ok: false, error: "this address already holds an Agent ID here" });
@@ -117,7 +116,7 @@ http.createServer(async (req, res) => {
     if (u.pathname === "/bind" && req.method === "POST") {
       let raw = ""; for await (const c of req) { raw += c; if (raw.length > 20000) return json(res, 413, { ok: false, error: "too large" }); }
       let body = {}; try { body = JSON.parse(raw); } catch { return json(res, 400, { ok: false, error: "bad json" }); }
-      return handleBind(body, res);
+      return await handleBind(body, res);
     }
     // static site
     const file = u.pathname === "/" ? "index.html" : u.pathname.slice(1);
